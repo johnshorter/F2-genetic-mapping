@@ -10,3 +10,5 @@ RQTLinput.zip is the input files for the first few steps
 geno_pheno.csv is the output file from the first steps
 
 RQTL2input.zip	 is the input files used in the RQTL2 mapping section.
+
+The map files contain a smaller number of markers in the input files used for RQTL2 because we were more stringent with markers that had extreme H calls.

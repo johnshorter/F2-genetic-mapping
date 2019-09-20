@@ -1,0 +1,161 @@
+---
+title: "F2-geneticmapping"
+author: "John Shorter"
+date: "September 17, 2019"
+output: html_document
+---
+
+Loading in libraries
+
+```{r}
+library(plyr)
+library(dplyr)
+library(devtools)
+library(preprocessCore)
+library(argyle)
+library(qtl)
+library(DOQTL)
+library(qtl2)
+library(qtl2convert)
+```
+
+#Grabbing necessary input files and setting up a working directory. 
+```{r}
+setwd("~/Desktop/JohnS/test")
+
+phenotype <- read.csv("~/Desktop/JohnS/test/phenotype.csv")
+rownames(phenotype) <- phenotype$ID
+
+genotypes <- read.csv("~/Desktop/JohnS/test/genotypes2_extra.csv")
+
+genos.map <- read.csv("~/Desktop/JohnS/seizure/map.csv")
+rownames(genos.map)=genos.map$marker
+
+```
+
+
+#Constructing a genotype object. This is for RQTL analysis. This file can also be used for RQTL2 by removing rows 2,3,4,5 and columns 1,2,3,5. 
+```{r}
+##This is an optional step to set up a file that has both phenotypes and genotypes needed for later analysis. 
+genos.G <- genotypes[c(1,4:length(genotypes))]
+rownames(genos.G)=genos.G$Marker
+genos.G <- genos.G[-1]
+
+genos.G=as.matrix(genos.G)
+head(genos.G)
+
+
+x=rep("NA",nrow(phenotype))
+genos.ped <- data.frame("fid"=x, "iid"=x, "age"=x, "sex"=x,"pheno"=x)
+genos.ped$fid <- "A"
+genos.ped$iid <- phenotype[["ID"]]
+rownames(genos.ped) =  as.character(genos.ped$iid)
+genos.ped$age <- phenotype[["Age"]]
+genos.ped$sex <- as.numeric(relevel(phenotype[["Sex"]],"M"))
+genos.ped$pheno <- phenotype[["myoclonic_seizure"]]
+
+genos <- genotypes(G = genos.G,
+                   map = genos.map,
+                   ped = genos.ped,
+                   alleles="native")
+
+genos <- argyle:::recode.genotypes(genos,mode="01")
+
+geno.recoded <- recode.to.parent(genos, "CC027")
+
+geno.recoded <- as.rqtl(geno.recoded, type = c("f2"))
+
+write.cross(geno.recoded, format=c("csv"), filestem=paste0("~/Desktop/JohnS/test/geno_pheno"))
+cross <-  read.cross(format=c("csv"),file=paste0("~/Desktop/JohnS/test/geno_pheno",".csv"), 
+                                               na.strings=c("-"), genotypes=c("AA", "AB", "BB"),
+                                               alleles=c("A", "B"), map.function=c("morgan"))
+summary(cross)
+```
+
+#RQTL setup. 
+```{r}
+##The only thing that RQTL has that is better than RQTL two is the multiple QTL mapping (mqm) function, that is called "scantwo". This looks at QTL interatctions. All other mapping commands are improved in RTQL2. This can only be done with one phenotype at a time.
+  out2.hk <- scantwo(cross, method="hk")
+  plot(out2.hk)
+  summary(out2.hk, thresholds=c(6.0, 4.7, 4.4, 4.7, 2.6))
+  plot(out2.hk, lower="fv1")
+  plot(out2.hk, lower="fv1", upper="av1")
+  summary( subset(out2.hk, chr=4) )
+  summary( subset(out2.hk, chr=c(4,6)) )
+  max(out2.hk, chr=c(4,6))
+
+```
+
+
+#RQTL2 file setup. See here for more details. https://kbroman.org/qtl2/assets/vignettes/input_files.html
+```{r}
+#Reading in our map file. Has to be changed to a version for RQTL2
+  seizuremap <- read.csv("~/Desktop/JohnS/seizure2/seizuremap1.csv")
+  seizuremap1 <- map_df_to_list(seizuremap, chr_column = "Chromosome", pos_column = "Position", marker_column = "Marker", Xchr = c("X"))
+
+#Adding covariate. Recommended only for variables that have a significant interaction with the trait    
+  covar <- read.csv("~/Desktop/JohnS/seizure2/covar.csv")
+  addcovar <- subset(covar, select=c("age"))
+  rownames(addcovar) <- covar$ID
+  
+##This is the main phenotype file. Can map multiple phenotypes at once. Here I am mapping 2.  
+  seizurepheno <- read.csv("~/Desktop/JohnS/seizure2/seizurepheno.csv")
+  seizurephenomatrix <- as.matrix(seizurepheno[,2:3])
+  rownames(seizurephenomatrix) <- seizurepheno$ID
+  
+##yaml is a special file that contains the information needed for this QTL analysis. See this link for details https://kbroman.org/qtl2/assets/vignettes/input_files.html  
+  
+  seizureqtl <- read_cross2("/Users/shorter/Desktop/JohnS/seizure2/seizuremapping.yaml")
+  pr <- calc_genoprob(seizureqtl, map = seizuremap1)
+  pr <- subset(pr, chr=c(1:20)) 
+```
+
+#Running the QTL analysis and making the main plot
+```{r}
+#This is the main QTL mapping function.  
+qtlmapping <- scan1(pr, pheno = seizurephenomatrix, addcovar = addcovar)
+  
+##Gives you all of the QTL peaks. Threshold and the CI drop can be changed  
+  find_peaks(qtlmapping, map = seizuremap1, threshold=3.44, drop=1.5)
+
+# overall maximum LOD score. This is just to make the graph look good, and can be changed if a QTL peak is higher.   
+  par(mar=c(4.1, 5.1, 1.1, 1.1))
+  ymx <- 6.5 
+  
+##Let's make our plot  
+  plot_scan1(qtlmapping, map = seizuremap1, lodcolumn=1, col="slateblue", ylim=c(0, ymx*1.02), bgcolor = "gray97",     altbgcolor = "gray89")
+##This lets us map 2 traits at once  
+  plot(qtlmapping, map = seizuremap1, lodcolumn=2, col="violetred", add=TRUE)
+##This gives us a legend  
+  legend("topright", legend=c("Myoclonic", "Generalized"), lwd=2, col=c("slateblue", "violetred"), colnames(qtlmapping))
+  
+##Change n_perm to a higher number, like 10000, but it takes a long time to run. 
+  operm <- scan1perm(pr, pheno= seizurephenomatrix, n_perm=50, chr_lengths=chr_lengths(map))
+  summary(operm, alpha=c(0.1, 0.05))
+#Add in a solid line for the 95% permutation threshold  
+  abline(h=3.95, col="slateblue")
+  abline(h=3.89, col="violetred")
+
+  
+##This is to make QTL plots for a single chromosome.     
+  par(mar=c(2.1, 4.1, 2.1, 1.1))
+  plot(qtlmapping, chr="1", map = seizuremap1, lodcolumn=2, col="violetred", bg="white", ylab = NA)  
+  plot(qtlmapping, chr="1", map = seizuremap1, lodcolumn=1, col="slateblue", add=TRUE)  
+  title(main = "Chromosome 1")
+  abline(h=3.95, col="slateblue")
+  abline(h=3.89, col="violetred")
+  
+  plot(qtlmapping, chr="4", map = seizuremap1, lodcolumn=1, col="slateblue", bg="white", xlab = NA, ylab = NA)  
+  plot(qtlmapping, chr="4", map = seizuremap1, lodcolumn=2, col="violetred", add=TRUE)
+  title(main = "Chromosome 4")
+  abline(h=3.95, col="slateblue")
+  abline(h=3.89, col="violetred")
+  
+  plot(qtlmapping, chr="5", map = seizuremap1, lodcolumn=1, col="slateblue", bg="white", xlab = NA, ylab = NA)  
+  plot(qtlmapping, chr="5", map = seizuremap1, lodcolumn=2, col="violetred", add=TRUE)
+  title(main = "Chromosome 5")
+  abline(h=3.95, col="slateblue")
+  abline(h=3.89, col="violetred")
+  
+```
+
